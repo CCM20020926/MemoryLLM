@@ -30,6 +30,7 @@ def parse_args(args=None):
     return parser.parse_known_args(args)[0]
 
 # This is the customized building prompt for chat models
+# 按照模型类型构建聊天模板
 def build_chat(tokenizer, prompt, model_name):
     if "chatglm3" in model_name:
         prompt = tokenizer.build_chat_input(prompt)
@@ -64,39 +65,51 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
 
     preds = []
 
+    # 对于带记忆的模型，对其记忆内容做备份
     if 'memory' in model_name:
         backup_memory = model.memory.clone().detach().cpu()
 
     count = 0
+    
+    # 读取测试数据
     for json_obj in tqdm(data):
 
         count += 1
         # if count == 5: break
-
+        
+        # ??
         if exclude_or:
             if "or" in json_obj['input']:
                 continue
-
+        
+        # 每当处理一个 json_obj 时，重置记忆内容1
         if 'memory' in model_name:
             model.memory.data = backup_memory.clone().detach().to(device)
 
+        # 封装为提示词
         prompt = prompt_format.format(**json_obj)
 
+        # 如果不开启检索增强生成
         if retrieval is None:
             # truncate to fit max_length (we suggest truncate in the middle, since the left and right side may contain crucial instructions)
-            tokenized_prompt = tokenizer(prompt, truncation=False, return_tensors="pt").input_ids[0]
+            tokenized_prompt = tokenizer(prompt, truncation=False, return_tensors="pt").input_ids[0]  # 问题：为什么带[0]？
 
         else:
             # if "Question" in prompt.split("\n\n")[-1]:
             #     tokenized_prompt = tokenizer("\n\n".join(prompt.split("\n\n")[:-1]), truncation=False, return_tensors="pt").input_ids[0]
             # else:
             #     tokenized_prompt = tokenizer("\n\n".join(prompt.split("\n\n")[:-2]), truncation=False, return_tensors="pt").input_ids[0]
+            
+            # 开启检索增强的处理模式
+            # 取 {context} 占位符之前的部分作为输入
             prompt_context = prompt.split(prompt_format.split("{context}")[-1].split("Question")[0])[0]
             tokenized_prompt = tokenizer(prompt_context, truncation=False, return_tensors="pt").input_ids[0]
 
         if "chatglm3" in model_name:
+            # 分词、转成 tensor (对于 chatglm3 不添加 special_tokens )
             tokenized_prompt = tokenizer(prompt, truncation=False, return_tensors="pt", add_special_tokens=False).input_ids[0]
         
+        # 提示词超过最大长度限制情形
         if max_length > 0 and len(tokenized_prompt) > max_length:
 
             # half = int(max_length/2)
@@ -107,13 +120,17 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
                 prompt = tokenizer.decode(tokenized_prompt[-(max_length - max_gen):], skip_special_tokens=True)
             
             else:
+                # ??
                 tokenized_prompt = tokenizer(
                     tokenizer.decode(tokenized_prompt[-(max_length - max_gen):], skip_special_tokens=True),
                     truncation=False, return_tensors="pt", add_special_tokens=False
                 ).input_ids[0]
 
+        # 需要调用 build_chat 的情形
         if dataset not in ["trec", "triviaqa", "samsum", "lsht", "lcc", "repobench-p"]: # chat models are better off without build prompts on these tasks
             prompt = build_chat(tokenizer, prompt, model_name)
+       
+        # 输入方式处理
         if "chatglm3" in model_name:
             input = prompt
 
@@ -121,9 +138,13 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
 
             contexts_ids = []
 
+            # 数据集为 'gov_report', 'multi_news' 或者 'qmsum'
             if dataset == 'gov_report' or dataset == 'multi_news' or dataset == 'qmsum':
+                
+                # ??
                 sentence = tokenizer("\n\n".join(prompt.split("\n\n")[-2:]), add_special_tokens=False).input_ids
                 prompt_ids = tokenizer(prompt.replace("\n\n".join(prompt.split("\n\n")[-2:]), "").strip(), add_special_tokens=False, truncation=False).input_ids
+                
                 while len(prompt_ids) > 0:
                     if contexts_ids == []:
                         contexts_ids.append(prompt_ids[-512:])
@@ -131,13 +152,21 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
                     else:
                         contexts_ids.append(prompt_ids[-512:])
                         prompt_ids = prompt_ids[:-512]
+                
+                # 翻转 contexts_ids        
                 contexts_ids = contexts_ids[::-1]
+                
                 contexts_ids = [torch.tensor(context_ids).to(device) for context_ids in contexts_ids]
+                
                 sentence = torch.tensor(sentence).to(device)
 
             else:
+                
+                # 执行 BM25 检索的情形
                 if retrieval is not None:
                     parts = []
+                    
+                    # 按照 512 大小对上下文分块
                     for i in range(0, len(tokenized_prompt), 512):
                         parts.append(tokenized_prompt[i:i+512])
                     parts = [tokenizer.decode(part) for part in parts]
@@ -146,6 +175,8 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
                     #     query = prompt.split("\n\n")[-1]
                     # else:
                     #     query = "\n\n".join(prompt.split("\n\n")[-2:])
+                    
+                    # 取出 query
                     query = prompt[len(prompt_context):]
             
                     # retriever = BM25Retriever.from_texts(parts)
@@ -158,7 +189,10 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
                     prompt = result + query
 
                 prompt_ids = tokenizer(prompt, add_special_tokens=False, truncation=False).input_ids
+                
                 while len(prompt_ids) > 0:
+                    
+                    # 切分 context 记忆块
                     if contexts_ids == []:
                         contexts_ids.append(prompt_ids[-(512-max_gen):])
                         prompt_ids = prompt_ids[:-(512-max_gen)]
@@ -166,12 +200,14 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
                         contexts_ids.append(prompt_ids[-512:])
                         prompt_ids = prompt_ids[:-512]
 
+                # ???
                 contexts_ids = contexts_ids[::-1]
                 contexts_ids = [torch.tensor(context_ids).to(device) for context_ids in contexts_ids]
                 
                 sentence = contexts_ids[-1]
                 contexts_ids = contexts_ids[:-1]
 
+        # 普通模型输入方式：直接传整个 prompt
         else:
             input = tokenizer(prompt, truncation=False, return_tensors="pt").to(device)
         
@@ -187,11 +223,14 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
                 eos_token_id=[tokenizer.eos_token_id, tokenizer.encode("\n", add_special_tokens=False)[-1]],
             )[0]
         else:
-
+            
+            # 针对记忆模型
             if 'memory' in model_name:
 
                 with torch.no_grad():
-
+                    
+                    # 分批注入记忆
+                    
                     for context in contexts_ids:
                         model.inject_memory(
                             context.unsqueeze(0).to(device),
@@ -209,6 +248,7 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
                         temperature=1.0,
                     )[0]
 
+            # 针对普通无记忆模型
             else:
 
                 context_length = input.input_ids.shape[-1]
@@ -236,6 +276,8 @@ def seed_everything(seed):
     torch.cuda.manual_seed_all(seed)
 
 def load_model_and_tokenizer(path, model_name, device):
+    # 根据模型系列类型，选择分词器、权重加载方式
+    
     if "chatglm" in model_name or "internlm" in model_name or "xgen" in model_name:
         tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(path, trust_remote_code=True, torch_dtype=torch.bfloat16).to(device)
@@ -279,21 +321,28 @@ def load_model_and_tokenizer(path, model_name, device):
 if __name__ == '__main__':
     args = parse_args()
     seed_everything(args.seed)
+    
     model2path = json.load(open("longbench_config/model2path.json", "r"))
     model2maxlen = json.load(open("longbench_config/model2maxlen.json", "r"))
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
     model_name = args.model
+    
     # define your model
     if args.path is not None:
         model2path[model_name] = args.path
     if args.max_length is not None:
         model2maxlen[model_name] = args.max_length
         print("Override max length")
+    
     model, tokenizer = load_model_and_tokenizer(model2path[model_name], model_name, device)
     max_length = model2maxlen[model_name]
+    
     if args.e:
         datasets = ["qasper", "multifieldqa_en", "hotpotqa", "2wikimqa", "gov_report", "multi_news", \
             "trec", "triviaqa", "samsum", "passage_count", "passage_retrieval_en", "lcc", "repobench-p"]
+    
     else:
         # datasets = ["narrativeqa", "qasper", "multifieldqa_en", "multifieldqa_zh", "hotpotqa", "2wikimqa", "musique", \
         #             "dureader", "gov_report", "qmsum", "multi_news", "vcsum", "trec", "triviaqa", "samsum", "lsht", \
@@ -302,10 +351,12 @@ if __name__ == '__main__':
             datasets = ["hotpotqa", "narrativeqa", "qasper", "multifieldqa_en", "2wikimqa", "musique"]
         else:
             datasets = [args.dataset]
-         
+    
+    # 加载任务配置     
     # we design specific prompt format and max generation length for each task, feel free to modify them to optimize model output
     dataset2prompt = json.load(open("longbench_config/dataset2prompt.json", "r"))
     dataset2maxlen = json.load(open("longbench_config/dataset2maxlen.json", "r"))
+    
     # predict on each dataset
     if not os.path.exists(f"longbench/pred_seed{args.seed}"):
         os.makedirs(f"longbench/pred_seed{args.seed}")
@@ -355,6 +406,7 @@ if __name__ == '__main__':
 
         prompt_format = dataset2prompt[dataset]
         max_gen = dataset2maxlen[dataset]
+        
         preds = get_pred(model, tokenizer, data, args.max_length, max_gen, prompt_format, dataset, device, model_name, args.retrieval, exclude_or=args.exclude_or)
         with open(out_path, "w", encoding="utf-8") as f:
             for pred in preds:
