@@ -1555,6 +1555,9 @@ class MemoryLLM(LlamaForCausalLM):
                         delta_memory=None,
                         update_memory=False):
 
+        # 记忆写入方式：先通过主干 LM 前向传播，之后通过 update_memory_with_delta_memory 方法更新记忆池，输入为 
+        # output.delta_memory
+
         output = self(input_ids=context_ids,
                 attention_mask=context_attention_mask,
                 delta_memory=delta_memory,
@@ -1571,6 +1574,7 @@ class MemoryLLM(LlamaForCausalLM):
 
 
     def drop_memory(self, current_memory, drop_length=None, unsequeezed=True):
+        # 丢弃方式：随机截掉 drop_length 行 张量
 
         if unsequeezed:
 
@@ -1606,6 +1610,11 @@ class MemoryLLM(LlamaForCausalLM):
             delta_memory = delta_memory.detach()[0]
 
         if self.initialized == 0:
+
+            # 如果是首次写入记忆，直接将 delta_memory 内容加入到记忆池
+            # 加入方式：
+            # 如果 记忆长度 K = self.num_tokens * self.num_blocks 能够被  delta_memory的 长度 L 整除，记 n = K / L， 直接将 [delta_memory] * n 保存到记忆池，替换初始记忆状态，在 dim=1 维度上拼接
+            #  如果不能，即 n = int(K/L) （向下取整），则 将 [delta_memory] * n + [delta_memory[:, - (K mod L): ]]  存到记忆池，替换初始记忆状态，即最后一个 delta_memory 只取最后 K mod L 行， 在 dim=1 维度上拼接
 
             if delta_memory.shape[1] < (self.num_tokens * self.num_blocks):
                 if ((self.num_tokens * self.num_blocks) % delta_memory.shape[1]) == 0:
@@ -1652,6 +1661,8 @@ class MemoryLLM(LlamaForCausalLM):
                         self.memory.data = torch.cat([current_memory, delta_memory], dim=1)
 
             else:
+                # 如果不是首次写入，先随机舍弃当前记忆池中的 K 行向量，再将新记忆追加到当前记忆池的末尾
+
                 if self.drop_memory_per_layer:
                     for idx in range(len(self.memory)):
                         current_memory = self.memory.data[idx].detach()
@@ -1678,6 +1689,8 @@ class MemoryLLM(LlamaForCausalLM):
             return hidden_states
     
         if delta_memory is None or len(delta_memory) == 0:
+            
+            # 当 is_injection = True 时，取记忆池的后 num_tokens 行，否则取全部
 
             if is_injection:
                 cur_memory = self.memory[idx][ - self.num_tokens:].unsqueeze(0).repeat(len(hidden_states), 1, 1)
@@ -1735,6 +1748,7 @@ class MemoryLLM(LlamaForCausalLM):
                         cur_memory,
                     ], dim=1)
 
+        # 如果有 bos_embedding ， 加到 cur_memory 前面
         if self.add_bos_embedding:
             if self.bos_embedding[idx].device != cur_memory.device:
                 cur_memory = torch.cat([self.bos_embedding[idx].unsqueeze(0).repeat(len(cur_memory), 1, 1).to(cur_memory.device), cur_memory], dim=1)
@@ -1799,6 +1813,7 @@ class MemoryLLM(LlamaForCausalLM):
         # TODO: currently ignore cache_position
         past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
         
+        # 生成 position Embedding
         if self.initialized:
             if past_seen_tokens > 0:
                 cache_position = torch.arange(
@@ -1811,6 +1826,7 @@ class MemoryLLM(LlamaForCausalLM):
                     cache_position = torch.arange(
                         0, inputs_embeds.shape[1] + self.num_tokens + int(self.add_bos_embedding), device=inputs_embeds.device
                     )
+                
                 elif delta_memory is not None and delta_memory.shape[2] == self.num_tokens and not cat_to_maximum_memory:
                     cache_position = torch.arange(
                         0, inputs_embeds.shape[1] + self.num_tokens + int(self.add_bos_embedding), device=inputs_embeds.device
@@ -1841,6 +1857,7 @@ class MemoryLLM(LlamaForCausalLM):
             
         position_ids = cache_position.unsqueeze(0)
 
+        # 生成 attention_mask
         causal_mask = self.model._update_causal_mask(
             attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
         )
@@ -1852,6 +1869,7 @@ class MemoryLLM(LlamaForCausalLM):
         next_decoder_cache = () if use_cache else None
         all_delta_memory = [] if output_delta_memory else None
 
+        # LoRA 配置处理
         if self.add_decoder_lora:
 
             if is_injection or (delta_memory is not None and delta_memory.shape[2] == self.num_tokens and not cat_to_maximum_memory):
@@ -1866,17 +1884,23 @@ class MemoryLLM(LlamaForCausalLM):
 
         for idx, decoder_layer in enumerate(self.model.layers):
             
+            # 收集各层 hidden_states
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
             
             if past_key_values is None or past_key_values.get_seq_length(layer_idx=idx) == 0:
-
+                
+                # 注入记忆模式
+                # 注意：当 is_injection=False 但 self._detach_memory 不为 true 时，仍调用 cat_memory_and_hiddens 
                 if is_injection or (not self._detach_memory):
+                    # 拼接 hidden_state、 delta_memory （要写入的记忆内容） 、记忆池
                     hidden_states = self.cat_memory_and_hiddens(idx,
                                                     hidden_states=hidden_states,
                                                     delta_memory=delta_memory,
                                                     is_injection=is_injection,
                                                     cat_to_maximum_memory=cat_to_maximum_memory)
+                
+                # 普通模式
                 else:
                     hidden_states = torch.cat([
                         self.bos_embedding[idx].unsqueeze(0).repeat(len(hidden_states), 1, 1),
@@ -1889,6 +1913,7 @@ class MemoryLLM(LlamaForCausalLM):
                     prefix_token_length = min(prefix_token_length, hidden_states.shape[1] - self.num_tokens)
 
                 if is_injection:
+                    # 为 hidden state 添加 memory positional_embedding
                     if self.new_memory_positional_emb.device != hidden_states.device:
                         hidden_states[:, -self.num_tokens:] += self.new_memory_positional_emb.to(hidden_states.device)
                     else:
@@ -1926,7 +1951,9 @@ class MemoryLLM(LlamaForCausalLM):
 
             hidden_states = layer_outputs[0]
             if output_delta_memory:
+                # 将 hiddent_states 最后 self.num_tokens 行加入 all_delta_memory
                 all_delta_memory.append(hidden_states[:, -self.num_tokens:])
+
             hidden_states = hidden_states[:, -input_ids.shape[1]:]
 
             if use_cache:
@@ -1934,7 +1961,8 @@ class MemoryLLM(LlamaForCausalLM):
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
-            
+        
+        # 处理最后一层隐含输出（先做正则化处理）
         hidden_states = self.model.norm(hidden_states)
             
         # add hidden states from the last decoder layer
@@ -1950,6 +1978,8 @@ class MemoryLLM(LlamaForCausalLM):
             if all_delta_memory[0].device != all_delta_memory[-1].device:
                 assert not self.training
                 device = all_delta_memory[0].device
+
+                # 将 all_delta_memory 拼接，作为 delta_memory
                 all_delta_memory = [x.to(device) for x in all_delta_memory]
                 delta_memory = torch.stack(all_delta_memory, dim=0).transpose(0, 1)
 
