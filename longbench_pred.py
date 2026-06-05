@@ -218,8 +218,8 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
         else:
             input = tokenizer(prompt, truncation=False, return_tensors="pt").to(device)
 
-        logger.info("Prompt:", prompt)
-        logger.info("Answers:", json_obj["answers"])
+        logger.info("Prompt: %s", prompt[:100])
+        logger.info("Answers: %s", json_obj["answers"])
         
         if dataset == "samsum": # prevent illegal output on samsum (model endlessly repeat "\nDialogue"), might be a prompting issue
             raise NotImplementedError
@@ -300,7 +300,8 @@ def load_model_and_tokenizer(path, model_name, device):
         if args.split_model:
             model = MemoryLLM.from_pretrained(path, device_map='auto')
         else:
-            model = MemoryLLM.from_pretrained(path).to(device)
+            model = MemoryLLM.from_pretrained(path, device_map='auto')
+            #model = MemoryLLM.from_pretrained(path, device_map='auto').to(device)
 
     elif "llama2" in model_name or 'openllama' in model_name:
         # replace_llama_attn_with_flash_attn()
@@ -344,7 +345,7 @@ if __name__ == '__main__':
     
     model_name = args.model
 
-    logger.info("Model:", model_name)
+    logger.info("Model: %s", model_name)
     
     # define your model
     if args.path is not None:
@@ -381,7 +382,7 @@ if __name__ == '__main__':
         os.makedirs(f"longbench/pred_seed{args.seed}_e")
     
     for idx, dataset in enumerate(datasets):
-        logger.info("Eval bench:", dataset)
+        logger.info("Eval bench: %s", dataset)
 
         if args.e:
             data = load_dataset('THUDM/LongBench', f"{dataset}_e", split='test')
