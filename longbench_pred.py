@@ -12,11 +12,17 @@ import random
 import argparse
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
+from util import get_logger
+
 # from llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
+
+logger = get_logger('longbench_pred')
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True, choices=["memoryllm-7b", "memory-openllama-3b", "longlora-7b-16k", "longllama-3b", "longllama-3b-v2", "openllama-3b-2k", "openllama-3b-v2-2k", "llama2-7b-4k", "llama2-7b-chat-4k", "longchat-v1.5-7b-32k", "xgen-7b-8k", "internlm-7b-8k", "chatglm2-6b", "chatglm2-6b-32k", "vicuna-v1.5-7b-16k"])
+    parser.add_argument('--model', type=str, required=True, choices=[
+        "memoryllm-7b", "memoryllm-8b",
+        "memory-openllama-3b", "longlora-7b-16k", "longllama-3b", "longllama-3b-v2", "openllama-3b-2k", "openllama-3b-v2-2k", "llama2-7b-4k", "llama2-7b-chat-4k", "longchat-v1.5-7b-32k", "xgen-7b-8k", "internlm-7b-8k", "chatglm2-6b", "chatglm2-6b-32k", "vicuna-v1.5-7b-16k"])
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument("--path", default=None, type=str)
     parser.add_argument("--max_length", default=None, type=int)
@@ -72,7 +78,6 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
     count = 0
     
     # 读取测试数据
-    print("Start longbench test. Model:", model)
 
     for json_obj in tqdm(data):
 
@@ -212,6 +217,9 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
         # 普通模型输入方式：直接传整个 prompt
         else:
             input = tokenizer(prompt, truncation=False, return_tensors="pt").to(device)
+
+        logger.info("Prompt:", prompt)
+        logger.info("Answers:", json_obj["answers"])
         
         if dataset == "samsum": # prevent illegal output on samsum (model endlessly repeat "\nDialogue"), might be a prompting issue
             raise NotImplementedError
@@ -265,6 +273,9 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
 
         pred = tokenizer.decode(output[context_length:], skip_special_tokens=True)
         pred = post_process(pred, model_name)
+
+        logger.info("Response:",  pred)
+
         preds.append({"pred": pred, "answers": json_obj["answers"], "all_classes": json_obj["all_classes"], "length": json_obj["length"]})
     return preds
 
@@ -283,12 +294,14 @@ def load_model_and_tokenizer(path, model_name, device):
     if "chatglm" in model_name or "internlm" in model_name or "xgen" in model_name:
         tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(path, trust_remote_code=True, torch_dtype=torch.bfloat16).to(device)
-    elif model_name == 'memoryllm-7b':
-        tokenizer = LlamaTokenizer.from_pretrained(path)
+    elif model_name == 'memoryllm-7b' or model_name =="memoryllm-8b":
+        #tokenizer = LlamaTokenizer.from_pretrained(path)
+        tokenizer = AutoTokenizer.from_pretrained(path)
         if args.split_model:
             model = MemoryLLM.from_pretrained(path, device_map='auto')
         else:
             model = MemoryLLM.from_pretrained(path).to(device)
+
     elif "llama2" in model_name or 'openllama' in model_name:
         # replace_llama_attn_with_flash_attn()
         tokenizer = LlamaTokenizer.from_pretrained(path)
@@ -330,6 +343,8 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     model_name = args.model
+
+    logger.info("Model:", model_name)
     
     # define your model
     if args.path is not None:
@@ -365,7 +380,8 @@ if __name__ == '__main__':
     if not os.path.exists(f"longbench/pred_seed{args.seed}_e"):
         os.makedirs(f"longbench/pred_seed{args.seed}_e")
     
-    for dataset in datasets:
+    for idx, dataset in enumerate(datasets):
+        logger.info("Eval bench:", dataset)
 
         if args.e:
             data = load_dataset('THUDM/LongBench', f"{dataset}_e", split='test')
