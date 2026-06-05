@@ -16,7 +16,7 @@ from langchain_core.documents import Document
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default=None, choices=["memoryllm-7b", "memory-openllama-3b", "longlora-7b-16k", "longllama-3b", "longllama-3b-v2", "openllama-3b-2k", "openllama-3b-v2-2k", "llama2-7b-4k", "llama2-7b-chat-4k", "longchat-v1.5-7b-32k", "xgen-7b-8k", "internlm-7b-8k", "chatglm2-6b", "chatglm2-6b-32k", "vicuna-v1.5-7b-16k"])
+    parser.add_argument('--model', type=str, required=True, choices=["memoryllm-7b", "memory-openllama-3b", "longlora-7b-16k", "longllama-3b", "longllama-3b-v2", "openllama-3b-2k", "openllama-3b-v2-2k", "llama2-7b-4k", "llama2-7b-chat-4k", "longchat-v1.5-7b-32k", "xgen-7b-8k", "internlm-7b-8k", "chatglm2-6b", "chatglm2-6b-32k", "vicuna-v1.5-7b-16k"])
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     parser.add_argument("--path", default=None, type=str)
     parser.add_argument("--max_length", default=None, type=int)
@@ -72,6 +72,8 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
     count = 0
     
     # 读取测试数据
+    print("Start longbench test. Model:", model)
+
     for json_obj in tqdm(data):
 
         count += 1
@@ -110,7 +112,7 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
             tokenized_prompt = tokenizer(prompt, truncation=False, return_tensors="pt", add_special_tokens=False).input_ids[0]
         
         # 提示词超过最大长度限制情形
-        if max_length > 0 and len(tokenized_prompt) > max_length:
+        if max_length is not None and max_length > 0 and len(tokenized_prompt) > max_length:
 
             # half = int(max_length/2)
             # prompt = tokenizer.decode(tokenized_prompt[:half], skip_special_tokens=True)+tokenizer.decode(tokenized_prompt[-half:], skip_special_tokens=True)

@@ -29,7 +29,10 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache, StaticCache
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
+
+#from transformers.modeling_flash_attention_utils import _flash_attention_forward
 from transformers.modeling_flash_attention_utils import _flash_attention_forward
+
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast,
@@ -343,7 +346,7 @@ class LlamaAttention(nn.Module):
         try:
             query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
         except:
-            import ipdb; jpdb.set_trace()
+            import ipdb; ipdb.set_trace()
 
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
@@ -1518,10 +1521,12 @@ class MemoryLLM(LlamaForCausalLM):
         self.d = config.hidden_size
         self.num_blocks = config.num_blocks
         self.num_tokens = config.num_tokens
-        self.drop_memory_per_layer = config.drop_memory_per_layer
-        self.add_decoder_lora = config.add_decoder_lora
-
+        self.drop_memory_per_layer = getattr(config, 'drop_memory_per_layer', True)
+        self.add_decoder_lora = getattr(config, 'add_decore_lora', False)
         self.add_bos_embedding = config.add_bos_embedding
+
+        self.lora_config = getattr(config, 'lora_config', None)
+
         self.memory = nn.Parameter(torch.randn([self.L, self.num_blocks * self.num_tokens, self.d]))
         print(f"Memory Pool Parameters: {len(self.memory.reshape(-1)) / 1_000_000_000:.4f} B")
         self.register_buffer("initialized", torch.tensor(0, dtype=torch.uint8))
@@ -1529,10 +1534,10 @@ class MemoryLLM(LlamaForCausalLM):
         self._detach_memory = False # new feature, will be used in later versions
         self.new_memory_positional_emb = nn.Parameter(torch.zeros([1, 1, self.d]))
 
-        if config.add_bos_embedding:
+        if self.add_bos_embedding:
             self.bos_embedding = nn.Parameter(torch.randn([self.L, 1, self.d]))
 
-        if config.lora_config is not None:
+        if self.lora_config is not None:
 
             from peft import get_peft_model, LoraConfig, TaskType
 
