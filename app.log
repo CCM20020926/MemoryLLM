@@ -12,3 +12,23 @@
 2026-06-05 14:54:36,287 - longbench_pred - INFO - ('Eval bench:', 'hotpotqa')
 2026-06-05 14:57:12,555 - longbench_pred - INFO - ('Model:', 'memoryllm-8b')
 2026-06-05 14:57:34,317 - longbench_pred - INFO - ('Eval bench:', 'hotpotqa')
+2026-06-05 15:23:01,447 - longbench_pred - INFO - Model: memoryllm-8b
+2026-06-05 15:23:28,226 - longbench_pred - INFO - Eval bench: hotpotqa
+2026-06-05 15:23:49,946 - longbench_pred - INFO - Prompt: Answer the question based on the given passages. Only give me the answer and do not output any other
+2026-06-05 15:23:49,946 - longbench_pred - INFO - Answers: ['Miller v. California']
+2026-06-05 15:31:58,350 - longbench_pred - INFO - Model: memoryllm-8b
+2026-06-05 15:32:22,240 - longbench_pred - INFO - Eval bench: hotpotqa
+2026-06-05 15:32:43,859 - longbench_pred - INFO - Prompt: Answer the question based on the given passages. Only give me the answer and do not output any other
+2026-06-05 15:32:43,860 - longbench_pred - INFO - Answers: ['Miller v. California']
+2026-06-05 15:33:01,301 - longbench_pred - INFO - Model: memoryllm-8b
+2026-06-05 15:33:28,411 - longbench_pred - INFO - Eval bench: hotpotqa
+2026-06-05 15:34:25,476 - longbench_pred - INFO - Model: memoryllm-7b
+2026-06-05 15:34:49,232 - longbench_pred - INFO - Eval bench: hotpotqa
+2026-06-05 15:36:05,048 - longbench_pred - INFO - Model: memoryllm-8b
+2026-06-05 15:36:28,680 - longbench_pred - INFO - Eval bench: hotpotqa
+2026-06-05 15:36:58,786 - longbench_pred - INFO - Model: memoryllm-8b
+2026-06-05 15:37:21,778 - longbench_pred - INFO - Eval bench: hotpotqa
+2026-06-05 15:37:39,897 - longbench_pred - INFO - Prompt: Answer the question based on the given passages. Only give me the answer and do not output any other
+2026-06-05 15:37:39,898 - longbench_pred - INFO - Answers: ['Miller v. California']
+2026-06-05 15:37:53,232 - longbench_pred - INFO - Model: memoryllm-7b
+2026-06-05 15:38:10,112 - longbench_pred - INFO - Eval bench: hotpotqa

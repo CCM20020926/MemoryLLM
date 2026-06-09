@@ -274,7 +274,7 @@ def get_pred(model, tokenizer, data, max_length, max_gen, prompt_format, dataset
         pred = tokenizer.decode(output[context_length:], skip_special_tokens=True)
         pred = post_process(pred, model_name)
 
-        logger.info("Response:",  pred)
+        logger.info("Response: %s",  pred)
 
         preds.append({"pred": pred, "answers": json_obj["answers"], "all_classes": json_obj["all_classes"], "length": json_obj["length"]})
     return preds
