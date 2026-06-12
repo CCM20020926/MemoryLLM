@@ -329,7 +329,7 @@ def load_model_and_tokenizer(path, model_name, device):
             debug=False,
         )
         model = model.to(device)
-        model = model.bfloat16()
+       # model = model.bfloat16()
         tokenizer = AutoTokenizer.from_pretrained(path, trust_remote_code=True, use_fast=False)
     model = model.eval()
     return model, tokenizer
